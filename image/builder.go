@@ -145,6 +145,7 @@ func createGitJobSpec(jobName, imageOutput string, gitSource *GitSource) batchv1
 					},
 				},
 			},
+			TTLSecondsAfterFinished: new(int32(60 * 60)), // 1 hour
 		},
 	}
 }
