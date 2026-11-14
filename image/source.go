@@ -1,5 +1,7 @@
 package image
 
+import "ownpreview/utils"
+
 type Source interface {
 	Source()
 	Version() string
@@ -13,5 +15,6 @@ type GitSource struct {
 func (g *GitSource) Source() {}
 
 func (g *GitSource) Version() string {
-	return g.Ref
+	v, _ := utils.SmallAlphaNumericHash(g.URL+g.Ref, 8)
+	return v
 }
