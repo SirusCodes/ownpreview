@@ -2,9 +2,8 @@ package utils
 
 import (
 	"crypto/sha256"
-	"encoding/base64"
+	"encoding/hex"
 	"fmt"
-	"regexp"
 )
 
 func SmallAlphaNumericHash(input string, length int) (string, error) {
@@ -15,17 +14,12 @@ func SmallAlphaNumericHash(input string, length int) (string, error) {
 	// Create SHA-256 hash
 	hash := sha256.Sum256([]byte(input))
 
-	// Encode to Base64 (contains letters, numbers, +, /)
-	encoded := base64.StdEncoding.EncodeToString(hash[:])
-
-	// Remove non-alphanumeric characters (+, /, =)
-	re := regexp.MustCompile(`[^a-zA-Z0-9]`)
-	clean := re.ReplaceAllString(encoded, "")
+	encoded := hex.EncodeToString(hash[:])
 
 	// Ensure length does not exceed available characters
-	if length > len(clean) {
-		length = len(clean)
+	if length > len(encoded) {
+		length = len(encoded)
 	}
 
-	return clean[:length], nil
+	return encoded[:length], nil
 }

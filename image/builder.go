@@ -3,7 +3,6 @@ package image
 import (
 	"context"
 	"fmt"
-	"ownpreview/utils"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -12,8 +11,9 @@ import (
 )
 
 type BuildRequest struct {
-	Source Source
-	Image  string
+	Registry  Registry
+	Source    Source
+	ImageName string
 }
 
 type ImageBuilder interface {
@@ -33,7 +33,11 @@ func NewK8sBuilder(client *kubernetes.Clientset, namespace string) ImageBuilder 
 }
 
 func (b *k8sBuilder) Build(ctx context.Context, req BuildRequest) error {
-	job, err := createJobSpec(req.Image, req.Source)
+	image := fmt.Sprintf("%s:%s", req.ImageName, req.Source.Version())
+	imageWithRegistry := fmt.Sprintf("%s/%s,registry.insecure=%t", req.Registry.GetRegistryURL(), image, req.Registry.InsecureConnection())
+	imageOutput := fmt.Sprintf("type=image,name=%s,push=true", imageWithRegistry)
+
+	job, err := createJobSpec(imageOutput, req.ImageName, req.Source)
 	if err != nil {
 		return err
 	}
@@ -46,22 +50,23 @@ func (b *k8sBuilder) Build(ctx context.Context, req BuildRequest) error {
 	return nil
 }
 
-func createJobSpec(targetImage string, builderSource Source) (batchv1.Job, error) {
-	jobName := func(val string) string {
-		hash, _ := utils.SmallAlphaNumericHash(val, 8)
-		return fmt.Sprintf("container-build-job-%s", hash)
-	}
+func createJobSpec(imageOutput, imageName string, builderSource Source) (batchv1.Job, error) {
+	jobName := fmt.Sprintf("build-%s-%s", imageName, builderSource.Version())
 
 	if gitSource, ok := builderSource.(*GitSource); ok {
-		return createGitJobSpec(jobName(gitSource.URL+gitSource.Ref), targetImage, gitSource), nil
+		return createGitJobSpec(jobName, imageOutput, gitSource), nil
 	}
 
 	return batchv1.Job{}, fmt.Errorf("unsupported builder source type")
 }
 
-func createGitJobSpec(jobName, targetImage string, gitSource *GitSource) batchv1.Job {
+func createGitJobSpec(jobName, imageOutput string, gitSource *GitSource) batchv1.Job {
+	// equivalent to:
+	// kubectl create job <jobName>
+	// --image=moby/buildkit:master-rootless
+	// --restart=Never -- sh -c "git clone <gitSource.URL> /workspace && cd /workspace && git checkout <gitSource.Ref> && buildctl-daemonless.sh build --frontend dockerfile.v0 --local context=/workspace --local dockerfile=/workspace --output type=image,name=<targetImage>,push=true"
 	return batchv1.Job{
-		ObjectMeta: metav1.ObjectMeta{Name: jobName},
+		Name: jobName,
 		Spec: batchv1.JobSpec{
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
@@ -106,18 +111,16 @@ func createGitJobSpec(jobName, targetImage string, gitSource *GitSource) batchv1
 								"--frontend", "dockerfile.v0",
 								"--local", "context=/workspace", // Pointing to the shared volume
 								"--local", "dockerfile=/workspace", // Pointing to the shared volume
-								"--output", fmt.Sprintf("type=image,name=%s,push=true", targetImage),
+								"--output", imageOutput,
 							},
 							SecurityContext: &corev1.SecurityContext{
 								SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeUnconfined},
-								RunAsUser:      func(i int64) *int64 { return &i }(1000),
-								RunAsGroup:     func(i int64) *int64 { return &i }(1000),
+								RunAsUser:      new(int64(1000)),
+								RunAsGroup:     new(int64(1000)),
 							},
 							VolumeMounts: []corev1.VolumeMount{
-								{
-									Name:      "workspace-volume",
-									MountPath: "/workspace",
-								},
+								{Name: "workspace-volume", MountPath: "/workspace"},
+								{Name: "docker-config", MountPath: "/home/user/.docker", ReadOnly: true},
 							},
 						},
 					},
@@ -128,6 +131,15 @@ func createGitJobSpec(jobName, targetImage string, gitSource *GitSource) batchv1
 							Name: "workspace-volume",
 							VolumeSource: corev1.VolumeSource{
 								EmptyDir: &corev1.EmptyDirVolumeSource{}, // Ephemeral storage just for this Pod
+							},
+						},
+						{
+							Name: "docker-config",
+							Secret: &corev1.SecretVolumeSource{
+								SecretName: "registry-creds",
+								Items: []corev1.KeyToPath{
+									{Key: ".dockerconfigjson", Path: "config.json"},
+								},
 							},
 						},
 					},

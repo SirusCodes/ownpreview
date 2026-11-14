@@ -17,6 +17,7 @@ type flags struct {
 	namespace  string
 	gitURL     string
 	gitRef     string
+	project    string
 }
 
 func parseFlags() *flags {
@@ -24,6 +25,7 @@ func parseFlags() *flags {
 	namespace := flag.String("namespace", "default", "Kubernetes namespace to use (default: default)")
 	gitURL := flag.String("git-url", "", "Git repository URL to build the container from")
 	gitRef := flag.String("git-ref", "main", "Git reference (branch, tag, or commit) to build the container from (default: main)")
+	project := flag.String("project", "my-project", "Project name for the container build (default: my-project)")
 
 	flag.Parse()
 
@@ -46,6 +48,7 @@ func parseFlags() *flags {
 		namespace:  *namespace,
 		gitURL:     *gitURL,
 		gitRef:     *gitRef,
+		project:    *project,
 	}
 }
 
@@ -63,13 +66,20 @@ func main() {
 		os.Exit(1)
 	}
 
+	rg := image.NewK8sRegistry()
+	if err := rg.Setup(context.Background(), k8sClient, f.namespace); err != nil {
+		fmt.Printf("error: failed to setup registry: %v", err)
+		os.Exit(1)
+	}
+
 	builder := image.NewK8sBuilder(k8sClient, f.namespace)
 	buildRequest := image.BuildRequest{
 		Source: &image.GitSource{
 			URL: f.gitURL,
 			Ref: f.gitRef,
 		},
-		Image: "my-image:latest",
+		ImageName:    f.project,
+		Registry: rg,
 	}
 
 	if err := builder.Build(context.Background(), buildRequest); err != nil {
