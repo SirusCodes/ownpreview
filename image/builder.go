@@ -3,9 +3,11 @@ package image
 import (
 	"context"
 	"fmt"
+	"ownpreview/k8s"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
@@ -33,26 +35,36 @@ func NewK8sBuilder(client *kubernetes.Clientset, namespace string) ImageBuilder 
 }
 
 func (b *k8sBuilder) Build(ctx context.Context, req BuildRequest) error {
-	image := fmt.Sprintf("%s:%s", req.ImageName, req.Source.Version())
+	v := req.Source.Version()
+	image := fmt.Sprintf("%s:%s", req.ImageName, v)
+	jobName := fmt.Sprintf("build-%s-%s", req.ImageName, v)
+
 	imageWithRegistry := fmt.Sprintf("%s/%s,registry.insecure=%t", req.Registry.GetRegistryURL(), image, req.Registry.InsecureConnection())
 	imageOutput := fmt.Sprintf("type=image,name=%s,push=true", imageWithRegistry)
 
-	job, err := createJobSpec(imageOutput, req.ImageName, req.Source)
+	job, err := createJobSpec(imageOutput, jobName, req.Source)
 	if err != nil {
 		return err
 	}
 
 	_, err = b.client.BatchV1().Jobs(b.namespace).Create(ctx, &job, metav1.CreateOptions{})
 	if err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			fmt.Printf("Job %s already exists. Skipping creation.\n", jobName)
+			return nil
+		}
+
 		return fmt.Errorf("failed to create job: %v", err)
+	}
+
+	if err := k8s.WatchJobProgress(ctx, b.client, b.namespace, jobName); err != nil {
+		return fmt.Errorf("failed to watch job progress: %v", err)
 	}
 
 	return nil
 }
 
-func createJobSpec(imageOutput, imageName string, builderSource Source) (batchv1.Job, error) {
-	jobName := fmt.Sprintf("build-%s-%s", imageName, builderSource.Version())
-
+func createJobSpec(imageOutput, jobName string, builderSource Source) (batchv1.Job, error) {
 	if gitSource, ok := builderSource.(*GitSource); ok {
 		return createGitJobSpec(jobName, imageOutput, gitSource), nil
 	}
@@ -69,11 +81,6 @@ func createGitJobSpec(jobName, imageOutput string, gitSource *GitSource) batchv1
 		Name: jobName,
 		Spec: batchv1.JobSpec{
 			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{
-						"container.apparmor.security.beta.kubernetes.io/buildkit": "unconfined",
-					},
-				},
 				Spec: corev1.PodSpec{
 					// 1. The Init Container runs first to clone the code
 					InitContainers: []corev1.Container{
@@ -115,8 +122,11 @@ func createGitJobSpec(jobName, imageOutput string, gitSource *GitSource) batchv1
 							},
 							SecurityContext: &corev1.SecurityContext{
 								SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeUnconfined},
-								RunAsUser:      new(int64(1000)),
-								RunAsGroup:     new(int64(1000)),
+								AppArmorProfile: &corev1.AppArmorProfile{
+									Type: corev1.AppArmorProfileTypeUnconfined,
+								},
+								RunAsUser:  new(int64(1000)),
+								RunAsGroup: new(int64(1000)),
 							},
 							VolumeMounts: []corev1.VolumeMount{
 								{Name: "workspace-volume", MountPath: "/workspace"},
