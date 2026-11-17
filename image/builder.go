@@ -39,7 +39,7 @@ func (b *k8sBuilder) Build(ctx context.Context, req BuildRequest) error {
 	image := fmt.Sprintf("%s:%s", req.ImageName, v)
 	jobName := fmt.Sprintf("build-%s-%s", req.ImageName, v)
 
-	imageWithRegistry := fmt.Sprintf("%s/%s,registry.insecure=%t", req.Registry.GetRegistryURL(), image, req.Registry.InsecureConnection())
+	imageWithRegistry := fmt.Sprintf("%s/%s,registry.insecure=%t", req.Registry.GetRegistryURL(), image, req.Registry.IsInsecureConnection())
 	imageOutput := fmt.Sprintf("type=image,name=%s,push=true", imageWithRegistry)
 
 	job, err := createJobSpec(imageOutput, jobName, req.Source)

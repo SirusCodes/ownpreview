@@ -66,8 +66,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	rg := image.NewK8sRegistry()
-	if err := rg.Setup(context.Background(), k8sClient, f.namespace); err != nil {
+	ctx := context.Background()
+
+	rg := image.NewK8sRegistry(k8sClient, f.namespace)
+	if err := rg.Setup(ctx); err != nil {
 		fmt.Printf("error: failed to setup registry: %v", err)
 		os.Exit(1)
 	}
@@ -78,11 +80,11 @@ func main() {
 			URL: f.gitURL,
 			Ref: f.gitRef,
 		},
-		ImageName:    f.project,
-		Registry: rg,
+		ImageName: f.project,
+		Registry:  rg,
 	}
 
-	if err := builder.Build(context.Background(), buildRequest); err != nil {
+	if err := builder.Build(ctx, buildRequest); err != nil {
 		fmt.Printf("error: failed to build container: %v", err)
 		os.Exit(1)
 	}

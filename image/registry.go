@@ -13,52 +13,57 @@ import (
 )
 
 type Registry interface {
-	Setup(ctx context.Context, client *kubernetes.Clientset, namespace string) error
+	Setup(context.Context) error
 	GetRegistryURL() string
-	InsecureConnection() bool
+	RemoveImage(context.Context, string) error
+	IsInsecureConnection() bool
 }
 
-type K8sRegistry struct {
+type k8sRegistry struct {
 	registryURL string
+	client      *kubernetes.Clientset
+	namespace   string
 }
 
 const k8sRegistryURL = "registry.default.svc.cluster.local:5000"
 
-func NewK8sRegistry() Registry {
-	return &K8sRegistry{
+func NewK8sRegistry(client *kubernetes.Clientset, namespace string) Registry {
+	return &k8sRegistry{
 		registryURL: k8sRegistryURL,
+		client:      client,
+		namespace:   namespace,
 	}
 }
 
-func (r *K8sRegistry) GetRegistryURL() string {
+func (r *k8sRegistry) GetRegistryURL() string {
 	return r.registryURL
 }
 
-func (r *K8sRegistry) InsecureConnection() bool {
+func (r *k8sRegistry) IsInsecureConnection() bool {
 	return true
 }
 
-func (r *K8sRegistry) Setup(ctx context.Context, client *kubernetes.Clientset, namespace string) error {
+func (r *k8sRegistry) Setup(ctx context.Context) error {
 	labels := map[string]string{"app": "registry"}
 	replicas := int32(1)
 
 	secret := &corev1.Secret{
 		Name:      "registry-creds",
-		Namespace: namespace,
+		Namespace: r.namespace,
 		Type:      corev1.SecretTypeDockerConfigJson,
 		Data: map[string][]byte{
 			corev1.DockerConfigJsonKey: []byte(`{"auths":{}}`),
 		},
 	}
 
-	if _, err := client.CoreV1().Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{}); apierrors.IsAlreadyExists(err) {
+	if _, err := r.client.CoreV1().Secrets(r.namespace).Create(ctx, secret, metav1.CreateOptions{}); apierrors.IsAlreadyExists(err) {
 		return nil
 	}
 
 	// 1. Equivalent to: kubectl create deployment registry --image=registry:2
 	deployment := &appsv1.Deployment{
 		Name:      "registry",
-		Namespace: namespace,
+		Namespace: r.namespace,
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &replicas,
 			Selector: &metav1.LabelSelector{
@@ -83,14 +88,14 @@ func (r *K8sRegistry) Setup(ctx context.Context, client *kubernetes.Clientset, n
 		},
 	}
 
-	if _, err := client.AppsV1().Deployments(namespace).Create(ctx, deployment, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
+	if _, err := r.client.AppsV1().Deployments(r.namespace).Create(ctx, deployment, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
 		return err
 	}
 
 	// 2. Equivalent to: kubectl expose deployment registry --port=5000 --target-port=5000
 	service := &corev1.Service{
 		Name:      "registry",
-		Namespace: namespace,
+		Namespace: r.namespace,
 		Spec: corev1.ServiceSpec{
 			Selector: labels,
 			Type:     corev1.ServiceTypeClusterIP,
@@ -103,9 +108,13 @@ func (r *K8sRegistry) Setup(ctx context.Context, client *kubernetes.Clientset, n
 		},
 	}
 
-	if _, err := client.CoreV1().Services(namespace).Create(ctx, service, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
+	if _, err := r.client.CoreV1().Services(r.namespace).Create(ctx, service, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
 		return err
 	}
 
 	return nil
+}
+
+func (r *k8sRegistry) RemoveImage(ctx context.Context, name string) error {
+	panic("Not implemented")
 }
