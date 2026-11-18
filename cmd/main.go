@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 	"ownpreview/image"
-	"ownpreview/k8s"
+	"ownpreview/internal/k8s"
 	"path/filepath"
 
 	"k8s.io/client-go/util/homedir"

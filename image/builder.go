@@ -3,7 +3,7 @@ package image
 import (
 	"context"
 	"fmt"
-	"ownpreview/k8s"
+	"ownpreview/internal/k8s"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
