@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"ownpreview/utils"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -75,6 +76,9 @@ func releaseIsDeployed(rel any) (bool, error) {
 }
 
 func SetupKeda(ctx context.Context, client *kubernetes.Clientset, kubeConfPath, namespace, wildcardDomain string) error {
+	log := utils.NewLogger("keda")
+	log.DebugContext(ctx, "checking KEDA installation status")
+
 	set := cli.New()
 	if kubeConfPath != "" {
 		set.KubeConfig = kubeConfPath
@@ -86,6 +90,8 @@ func SetupKeda(ctx context.Context, client *kubernetes.Clientset, kubeConfPath, 
 	}
 
 	if !ready {
+		log.InfoContext(ctx, "installing KEDA core and HTTP add-on")
+
 		ns := corev1.Namespace{
 			Name: kedaNamespace,
 		}
@@ -96,6 +102,7 @@ func SetupKeda(ctx context.Context, client *kubernetes.Clientset, kubeConfPath, 
 		}
 
 		// 2. Add and update the kedacore Helm repository
+		log.DebugContext(ctx, "ensuring helm repository", "repo", kedaRepoName, "url", kedaRepoURL)
 		if err := ensureHelmRepo(set, kedaRepoName, kedaRepoURL); err != nil {
 			return fmt.Errorf("setup helm repo: %w", err)
 		}
@@ -106,6 +113,7 @@ func SetupKeda(ctx context.Context, client *kubernetes.Clientset, kubeConfPath, 
 			return err
 		}
 		if !kedaDeployed {
+			log.InfoContext(ctx, "installing KEDA core chart")
 			if err := installChart(set, kedaNamespace, "keda", "kedacore/keda", nil); err != nil {
 				return fmt.Errorf("install keda core: %w", err)
 			}
@@ -117,13 +125,17 @@ func SetupKeda(ctx context.Context, client *kubernetes.Clientset, kubeConfPath, 
 			return err
 		}
 		if !httpDeployed {
+			log.InfoContext(ctx, "installing KEDA http-add-on chart")
 			if err := installChart(set, kedaNamespace, "http-add-on", "kedacore/keda-add-ons-http", nil); err != nil {
 				return fmt.Errorf("install keda http-add-on: %w", err)
 			}
 		}
+	} else {
+		log.DebugContext(ctx, "KEDA is already installed")
 	}
 
 	// 5. Always ensure the wildcard Ingress exists (idempotent)
+	log.DebugContext(ctx, "ensuring wildcard ingress", "domain", wildcardDomain)
 	if err := ensureWildcardIngress(ctx, client, wildcardDomain); err != nil {
 		return fmt.Errorf("create wildcard ingress: %w", err)
 	}

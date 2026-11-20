@@ -3,7 +3,9 @@ package deploy
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"ownpreview/image"
+	"ownpreview/utils"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -32,15 +34,31 @@ type k8sDeployer struct {
 	client    *kubernetes.Clientset
 	dynClient *dynamic.DynamicClient
 	namespace string
+	logger    *slog.Logger
 }
 
 func NewK8sDeployer(client *kubernetes.Clientset, namespace string, dynClient *dynamic.DynamicClient) Deployer {
-	return &k8sDeployer{client: client, namespace: namespace, dynClient: dynClient}
+	return &k8sDeployer{
+		client:    client,
+		namespace: namespace,
+		dynClient: dynClient,
+		logger:    utils.NewLogger("deployer"),
+	}
 }
 
 func (kd *k8sDeployer) Deploy(ctx context.Context, req DeployRequest) error {
 	appName := fmt.Sprintf("%s-%s", req.AppName, req.Version)
 	labels := map[string]string{"app": appName, "ownpreview.io/version": req.Version}
+
+	imageName := req.Image
+	if imageName == "" || imageName == req.AppName {
+		if req.Registry != nil {
+			imageName = fmt.Sprintf("%s/%s:%s", req.Registry.GetRegistryURL(), req.AppName, req.Version)
+		}
+	}
+
+	log := kd.logger.With("app", appName, "namespace", kd.namespace)
+	log.DebugContext(ctx, "creating deployment")
 
 	deployment := &appsv1.Deployment{
 		Name:      appName,
@@ -56,7 +74,7 @@ func (kd *k8sDeployer) Deploy(ctx context.Context, req DeployRequest) error {
 					Containers: []corev1.Container{
 						{
 							Name:  "app",
-							Image: req.Image,
+							Image: imageName,
 							Ports: []corev1.ContainerPort{{ContainerPort: req.AppPort}},
 							ReadinessProbe: &corev1.Probe{
 								TCPSocket: &corev1.TCPSocketAction{
@@ -75,7 +93,9 @@ func (kd *k8sDeployer) Deploy(ctx context.Context, req DeployRequest) error {
 	if _, err := kd.client.AppsV1().Deployments(kd.namespace).Create(ctx, deployment, metav1.CreateOptions{}); err != nil {
 		return fmt.Errorf("create deployment: %w", err)
 	}
+	log.DebugContext(ctx, "deployment created")
 
+	log.DebugContext(ctx, "creating service")
 	service := &corev1.Service{
 		Name:      appName,
 		Namespace: kd.namespace,
@@ -95,6 +115,7 @@ func (kd *k8sDeployer) Deploy(ctx context.Context, req DeployRequest) error {
 	if _, err := kd.client.CoreV1().Services(kd.namespace).Create(ctx, service, metav1.CreateOptions{}); err != nil {
 		return fmt.Errorf("create service: %w", err)
 	}
+	log.DebugContext(ctx, "service created")
 
 	kedaMetadata := map[string]any{
 		"name":      appName,
@@ -134,9 +155,11 @@ func (kd *k8sDeployer) Deploy(ctx context.Context, req DeployRequest) error {
 		Resource: "interceptorroutes",
 	}
 
+	log.DebugContext(ctx, "creating InterceptorRoute (v1beta1)")
 	if _, err := kd.dynClient.Resource(irGVR).Namespace(kd.namespace).Create(ctx, interceptorRoute, metav1.CreateOptions{}); err != nil {
 		return fmt.Errorf("create InterceptorRoute (v1beta1): %w", err)
 	}
+	log.DebugContext(ctx, "interceptor route created")
 
 	scaledObject := &unstructured.Unstructured{
 		Object: map[string]any{
@@ -169,9 +192,11 @@ func (kd *k8sDeployer) Deploy(ctx context.Context, req DeployRequest) error {
 		Resource: "scaledobjects",
 	}
 
+	log.DebugContext(ctx, "creating ScaledObject (v1alpha1)")
 	if _, err := kd.dynClient.Resource(soGVR).Namespace(kd.namespace).Create(ctx, scaledObject, metav1.CreateOptions{}); err != nil {
 		return fmt.Errorf("create ScaledObject: %w", err)
 	}
+	log.DebugContext(ctx, "scaled object created")
 
 	return nil
 }

@@ -3,6 +3,7 @@ package k8s
 import (
 	"context"
 	"fmt"
+	"ownpreview/utils"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -19,6 +20,9 @@ func WatchJobProgress(ctx context.Context, client *kubernetes.Clientset, namespa
 		return fmt.Errorf("failed to start job watch: %w", err)
 	}
 	defer watcher.Stop()
+
+	log := utils.NewLogger("watcher").With("job", jobName, "namespace", namespace)
+	log.DebugContext(ctx, "started watching job progress")
 
 	lastSucceeded, lastTarget := int32(-1), int32(-1)
 
@@ -40,14 +44,13 @@ func WatchJobProgress(ctx context.Context, client *kubernetes.Clientset, namespa
 				continue
 			}
 
-			// Print live pod progress
 			target := int32(1)
 			if job.Spec.Completions != nil {
 				target = *job.Spec.Completions
 			}
 
 			if job.Status.Succeeded != lastSucceeded || target != lastTarget {
-				fmt.Printf("Building image....: %d/%d\n", job.Status.Succeeded, target)
+				log.InfoContext(ctx, "build progress", "succeeded", job.Status.Succeeded, "target", target)
 				lastSucceeded = job.Status.Succeeded
 				lastTarget = target
 			}
@@ -58,7 +61,7 @@ func WatchJobProgress(ctx context.Context, client *kubernetes.Clientset, namespa
 					continue
 				}
 				if cond.Type == batchv1.JobComplete {
-					fmt.Println("Job completed successfully.")
+					log.DebugContext(ctx, "build job completed successfully")
 					return nil
 				}
 				if cond.Type == batchv1.JobFailed {

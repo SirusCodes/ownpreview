@@ -3,7 +3,9 @@ package image
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"ownpreview/internal/k8s"
+	"ownpreview/utils"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -25,12 +27,14 @@ type ImageBuilder interface {
 type k8sBuilder struct {
 	client    *kubernetes.Clientset
 	namespace string
+	logger    *slog.Logger
 }
 
 func NewK8sBuilder(client *kubernetes.Clientset, namespace string) ImageBuilder {
 	return &k8sBuilder{
 		client:    client,
 		namespace: namespace,
+		logger:    utils.NewLogger("builder"),
 	}
 }
 
@@ -38,6 +42,9 @@ func (b *k8sBuilder) Build(ctx context.Context, req BuildRequest) error {
 	v := req.Source.Version()
 	image := fmt.Sprintf("%s:%s", req.ImageName, v)
 	jobName := fmt.Sprintf("build-%s-%s", req.ImageName, v)
+
+	log := b.logger.With("job", jobName, "image", image, "namespace", b.namespace)
+	log.DebugContext(ctx, "preparing build job")
 
 	imageWithRegistry := fmt.Sprintf("%s/%s,registry.insecure=%t", req.Registry.GetRegistryURL(), image, req.Registry.IsInsecureConnection())
 	imageOutput := fmt.Sprintf("type=image,name=%s,push=true", imageWithRegistry)
@@ -50,6 +57,7 @@ func (b *k8sBuilder) Build(ctx context.Context, req BuildRequest) error {
 	_, err = b.client.BatchV1().Jobs(b.namespace).Create(ctx, &job, metav1.CreateOptions{})
 	if err != nil {
 		if apierrors.IsAlreadyExists(err) {
+			log.WarnContext(ctx, "build job already exists; checking its progress")
 			if err := k8s.WatchJobProgress(ctx, b.client, b.namespace, jobName); err != nil {
 				return fmt.Errorf("failed to watch existing job progress: %v", err)
 			}
@@ -58,6 +66,7 @@ func (b *k8sBuilder) Build(ctx context.Context, req BuildRequest) error {
 
 		return fmt.Errorf("failed to create job: %v", err)
 	}
+	log.DebugContext(ctx, "build job created; waiting for completion")
 
 	if err := k8s.WatchJobProgress(ctx, b.client, b.namespace, jobName); err != nil {
 		return fmt.Errorf("failed to watch job progress: %v", err)

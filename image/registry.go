@@ -2,6 +2,8 @@ package image
 
 import (
 	"context"
+	"log/slog"
+	"ownpreview/utils"
 
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
@@ -23,6 +25,7 @@ type k8sRegistry struct {
 	registryURL string
 	client      *kubernetes.Clientset
 	namespace   string
+	logger      *slog.Logger
 }
 
 const k8sRegistryURL = "registry.default.svc.cluster.local:5000"
@@ -32,6 +35,7 @@ func NewK8sRegistry(client *kubernetes.Clientset, namespace string) Registry {
 		registryURL: k8sRegistryURL,
 		client:      client,
 		namespace:   namespace,
+		logger:      utils.NewLogger("registry"),
 	}
 }
 
@@ -44,6 +48,9 @@ func (r *k8sRegistry) IsInsecureConnection() bool {
 }
 
 func (r *k8sRegistry) Setup(ctx context.Context) error {
+	log := r.logger.With("namespace", r.namespace)
+	log.DebugContext(ctx, "setting up in-cluster registry")
+
 	labels := map[string]string{"app": "registry"}
 
 	secret := &corev1.Secret{
@@ -59,6 +66,9 @@ func (r *k8sRegistry) Setup(ctx context.Context) error {
 		if !apierrors.IsAlreadyExists(err) {
 			return err
 		}
+		log.DebugContext(ctx, "registry credentials secret already exists")
+	} else {
+		log.DebugContext(ctx, "registry credentials secret created")
 	}
 
 	// 1. Equivalent to: kubectl create deployment registry --image=registry:2
@@ -114,6 +124,9 @@ func (r *k8sRegistry) Setup(ctx context.Context) error {
 		if !apierrors.IsAlreadyExists(err) {
 			return err
 		}
+		log.DebugContext(ctx, "registry deployment already exists")
+	} else {
+		log.DebugContext(ctx, "registry deployment created")
 	}
 
 	// 2. Equivalent to: kubectl expose deployment registry --port=5000 --target-port=5000
@@ -136,8 +149,12 @@ func (r *k8sRegistry) Setup(ctx context.Context) error {
 		if !apierrors.IsAlreadyExists(err) {
 			return err
 		}
+		log.DebugContext(ctx, "registry service already exists")
+	} else {
+		log.DebugContext(ctx, "registry service created")
 	}
 
+	log.DebugContext(ctx, "container registry is ready", "registry_url", r.registryURL)
 	return nil
 }
 
