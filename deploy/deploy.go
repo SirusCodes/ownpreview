@@ -112,10 +112,11 @@ func (kd *k8sDeployer) Deploy(ctx context.Context, req DeployRequest) error {
 					"service": appName,
 					"port":    int64(80),
 				},
-				"rules": map[string]any{
-					"hosts": []string{req.Host},
+				"rules": []any{
+					map[string]any{
+						"hosts": []any{req.Host},
+					},
 				},
-				"coldStartTimeout": "30s",
 				"scalingMetric": map[string]any{
 					"requestRate": map[string]any{
 						"targetValue": int64(100),

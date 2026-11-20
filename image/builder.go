@@ -50,7 +50,9 @@ func (b *k8sBuilder) Build(ctx context.Context, req BuildRequest) error {
 	_, err = b.client.BatchV1().Jobs(b.namespace).Create(ctx, &job, metav1.CreateOptions{})
 	if err != nil {
 		if apierrors.IsAlreadyExists(err) {
-			fmt.Printf("Job %s already exists. Skipping creation.\n", jobName)
+			if err := k8s.WatchJobProgress(ctx, b.client, b.namespace, jobName); err != nil {
+				return fmt.Errorf("failed to watch existing job progress: %v", err)
+			}
 			return nil
 		}
 

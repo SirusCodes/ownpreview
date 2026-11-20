@@ -18,6 +18,7 @@ import (
 	"helm.sh/helm/v4/pkg/chart/v2/loader"
 	"helm.sh/helm/v4/pkg/cli"
 	"helm.sh/helm/v4/pkg/getter"
+	"helm.sh/helm/v4/pkg/kube"
 	"helm.sh/helm/v4/pkg/release/common"
 	releasev1 "helm.sh/helm/v4/pkg/release/v1"
 	"helm.sh/helm/v4/pkg/repo/v1"
@@ -62,11 +63,14 @@ func ReleaseDeployed(settings *cli.EnvSettings, namespace, releaseName string) (
 		return false, err
 	}
 
-	r, ok := rel.(releasev1.Release)
-	if !ok {
-		return false, fmt.Errorf("release incorrect type received: %v", r)
-	}
+	return releaseIsDeployed(rel)
+}
 
+func releaseIsDeployed(rel any) (bool, error) {
+	r, ok := rel.(*releasev1.Release)
+	if !ok || r == nil {
+		return false, fmt.Errorf("unexpected release type %T", rel)
+	}
 	return r.Info != nil && r.Info.Status == common.StatusDeployed, nil
 }
 
@@ -162,15 +166,23 @@ func ensureHelmRepo(settings *cli.EnvSettings, name, url string) error {
 		return err
 	}
 
-	f, err := repo.LoadFile(settings.RepositoryConfig)
-	if err != nil && !os.IsNotExist(err) {
+	f, err := loadRepoFile(settings.RepositoryConfig)
+	if err != nil {
 		return err
-	}
-	if f == nil {
-		f = repo.NewFile()
 	}
 	f.Update(e)
 	return f.WriteFile(settings.RepositoryConfig, 0644)
+}
+
+func loadRepoFile(path string) (*repo.File, error) {
+	f, err := repo.LoadFile(path)
+	if err == nil {
+		return f, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	return repo.NewFile(), nil
 }
 
 func prepareHelmAction(settings *cli.EnvSettings, namespace, chartRef string) (*action.Configuration, *chartv1.Chart, error) {
@@ -202,8 +214,10 @@ func installChart(settings *cli.EnvSettings, namespace, releaseName, chartRef st
 	install := action.NewInstall(actionConfig)
 	install.ReleaseName = releaseName
 	install.Namespace = namespace
+	install.Replace = true
 	install.WaitForJobs = true
 	install.Timeout = 5 * time.Minute
+	install.WaitStrategy = kube.StatusWatcherStrategy
 
 	_, err = install.Run(chrt, vals)
 	return err

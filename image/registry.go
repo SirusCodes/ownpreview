@@ -55,11 +55,14 @@ func (r *k8sRegistry) Setup(ctx context.Context) error {
 		},
 	}
 
-	if _, err := r.client.CoreV1().Secrets(r.namespace).Create(ctx, secret, metav1.CreateOptions{}); apierrors.IsAlreadyExists(err) {
-		return nil
+	if _, err := r.client.CoreV1().Secrets(r.namespace).Create(ctx, secret, metav1.CreateOptions{}); err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			return err
+		}
 	}
 
 	// 1. Equivalent to: kubectl create deployment registry --image=registry:2
+	dirOrCreate := corev1.HostPathDirectoryOrCreate
 	deployment := &appsv1.Deployment{
 		Name:      "registry",
 		Namespace: r.namespace,
@@ -78,7 +81,27 @@ func (r *k8sRegistry) Setup(ctx context.Context) error {
 							Name:  "registry",
 							Image: "registry:2",
 							Ports: []corev1.ContainerPort{
-								{ContainerPort: 5000},
+								{
+									ContainerPort: 5000,
+									HostPort:      5000,
+								},
+							},
+							VolumeMounts: []corev1.VolumeMount{
+								{
+									Name:      "registry-storage",
+									MountPath: "/var/lib/registry",
+								},
+							},
+						},
+					},
+					Volumes: []corev1.Volume{
+						{
+							Name: "registry-storage",
+							VolumeSource: corev1.VolumeSource{
+								HostPath: &corev1.HostPathVolumeSource{
+									Path: "/var/lib/ownpreview/registry",
+									Type: &dirOrCreate,
+								},
 							},
 						},
 					},
@@ -87,8 +110,10 @@ func (r *k8sRegistry) Setup(ctx context.Context) error {
 		},
 	}
 
-	if _, err := r.client.AppsV1().Deployments(r.namespace).Create(ctx, deployment, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
-		return err
+	if _, err := r.client.AppsV1().Deployments(r.namespace).Create(ctx, deployment, metav1.CreateOptions{}); err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			return err
+		}
 	}
 
 	// 2. Equivalent to: kubectl expose deployment registry --port=5000 --target-port=5000
@@ -107,8 +132,10 @@ func (r *k8sRegistry) Setup(ctx context.Context) error {
 		},
 	}
 
-	if _, err := r.client.CoreV1().Services(r.namespace).Create(ctx, service, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
-		return err
+	if _, err := r.client.CoreV1().Services(r.namespace).Create(ctx, service, metav1.CreateOptions{}); err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			return err
+		}
 	}
 
 	return nil
