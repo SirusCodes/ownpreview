@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"ownpreview/utils"
+	"ownpreview/internal/utils"
 )
 
 func TestNewLoggerDoesNotModifyDefaultLogger(t *testing.T) {

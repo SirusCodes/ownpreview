@@ -3,7 +3,7 @@ package image
 import (
 	"context"
 	"log/slog"
-	"ownpreview/utils"
+	"ownpreview/internal/utils"
 
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"

@@ -10,7 +10,7 @@ import (
 	"ownpreview/deploy"
 	"ownpreview/image"
 	"ownpreview/internal/k8s"
-	"ownpreview/utils"
+	"ownpreview/internal/utils"
 	"path/filepath"
 
 	"k8s.io/client-go/util/homedir"

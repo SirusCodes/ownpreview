@@ -1,6 +1,6 @@
 package image
 
-import "ownpreview/utils"
+import "ownpreview/internal/utils"
 
 type Source interface {
 	Source()

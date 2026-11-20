@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"ownpreview/internal/k8s"
-	"ownpreview/utils"
+	"ownpreview/internal/utils"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"

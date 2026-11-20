@@ -3,7 +3,7 @@ package k8s
 import (
 	"context"
 	"fmt"
-	"ownpreview/utils"
+	"ownpreview/internal/utils"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
