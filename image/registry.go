@@ -45,7 +45,6 @@ func (r *k8sRegistry) IsInsecureConnection() bool {
 
 func (r *k8sRegistry) Setup(ctx context.Context) error {
 	labels := map[string]string{"app": "registry"}
-	replicas := int32(1)
 
 	secret := &corev1.Secret{
 		Name:      "registry-creds",
@@ -65,7 +64,7 @@ func (r *k8sRegistry) Setup(ctx context.Context) error {
 		Name:      "registry",
 		Namespace: r.namespace,
 		Spec: appsv1.DeploymentSpec{
-			Replicas: &replicas,
+			Replicas: new(int32(1)),
 			Selector: &metav1.LabelSelector{
 				MatchLabels: labels,
 			},
